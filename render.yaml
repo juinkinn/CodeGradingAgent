@@ -15,18 +15,14 @@ services:
   - type: web
     name: codegrading-backend
     runtime: docker
-    plan: starter
+    plan: free
     dockerfilePath: ./backend/Dockerfile
     dockerContext: ./backend
     dockerCommand: python render_start.py
     healthCheckPath: /
-    disk:
-      name: codegrading-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: DATABASE_PATH
-        value: /var/data/codegrading.db
+        value: /tmp/codegrading.db
       - key: RABBITMQ_URL
         sync: false
       - key: AUTH_SECRET_KEY

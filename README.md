@@ -30,16 +30,18 @@ Dockerfiles are provided at the repository root (backend image), `backend/`
 Render does not run Docker Compose. Create a Blueprint from this repository;
 Render reads [render.yaml](./render.yaml) to deploy the frontend and backend.
 The backend service runs both the API and upload worker so they can share the
-SQLite database on its persistent disk. This requires the paid `starter` web
-service plan because Render persistent disks are not available on the free
-plan.
+SQLite database in its temporary filesystem. The Blueprint uses Render's Free
+web-service plan and does not require a persistent disk or payment method.
+This is suitable only for demos: the backend can spin down after inactivity,
+and the SQLite database is lost when it spins down, restarts, or redeploys.
 
 Before deploying, create an external RabbitMQ broker (for example, CloudAMQP)
 and provide its AMQP URL as `RABBITMQ_URL` when Render prompts for it. The
 Blueprint generates `AUTH_SECRET_KEY` and links the frontend URL to the
 backend's CORS and OAuth settings. Add `GEMINI_API_KEY` and the Langfuse
 credentials in the backend service's environment if grading-agent features
-are needed.
+are needed. Render's Free web service may take about a minute to wake after
+being idle.
 
 ## Run tests
 
