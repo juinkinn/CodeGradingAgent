@@ -7,3 +7,50 @@
 - React instructor chat UI:
   from `frontend`, run `npm install` and `npm run dev`. The Vite app is served
   at `http://localhost:5173` and calls the API at `http://localhost:8000`.
+
+## Run with Docker Compose
+
+From the repository root, run `docker compose up --build`. This starts the
+frontend at `http://localhost:8080`, the API at `http://localhost:8000`, the
+submission-upload worker, and RabbitMQ. RabbitMQ's management UI is at
+`http://localhost:15672`; the development credentials default to
+`codegrading` / `codegrading-dev-password`. Change these credentials before
+using this setup outside local development.
+
+Optionally copy `backend/.env.example` to `backend/.env` to configure Gemini,
+Langfuse, authentication, and telemetry. The app database and RabbitMQ data
+persist in Docker volumes. Stop the services with `docker compose down`; to
+also remove persisted data, run `docker compose down --volumes`.
+
+Dockerfiles are provided at the repository root (backend image), `backend/`
+(backend image with `backend` as the build context), and `frontend/`.
+
+## Deploy to Render
+
+Render does not run Docker Compose. Create a Blueprint from this repository;
+Render reads [render.yaml](./render.yaml) to deploy the frontend and backend.
+The backend service runs both the API and upload worker so they can share the
+SQLite database on its persistent disk. This requires the paid `starter` web
+service plan because Render persistent disks are not available on the free
+plan.
+
+Before deploying, create an external RabbitMQ broker (for example, CloudAMQP)
+and provide its AMQP URL as `RABBITMQ_URL` when Render prompts for it. The
+Blueprint generates `AUTH_SECRET_KEY` and links the frontend URL to the
+backend's CORS and OAuth settings. Add `GEMINI_API_KEY` and the Langfuse
+credentials in the backend service's environment if grading-agent features
+are needed.
+
+## Run tests
+
+From the repository root:
+
+```powershell
+Push-Location backend
+python -m unittest discover -s test -v
+Pop-Location
+
+Push-Location frontend
+npm run build
+Pop-Location
+```

@@ -11,6 +11,16 @@ Copy-Item .env.example .env
 uvicorn app.main:app --reload
 ```
 
+The backend can also be built with `docker build -t codegradingagent-backend .`
+from this directory. The repository-root `Dockerfile` builds the same backend
+image when invoked from the repository root.
+
+The automated backend tests use the standard library `unittest` runner:
+
+```powershell
+python -m unittest discover -s test -v
+```
+
 Configuration is read from `backend/.env` by `app/env.py`. The checked-in
 `.env.example` lists supported variables; `.env` is ignored by Git so API keys
 remain local. Environment variables already set in the process take precedence

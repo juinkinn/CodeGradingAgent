@@ -63,7 +63,11 @@ class Settings:
     @property
     def cors_origins(self) -> list[str]:
         origins = os.getenv("CORS_ORIGINS", "http://localhost:5173")
-        return [origin.strip() for origin in origins.split(",") if origin.strip()]
+        return [
+            self._normalize_origin(origin.strip())
+            for origin in origins.split(",")
+            if origin.strip()
+        ]
 
     @property
     def auth_secret_key(self) -> str | None:
@@ -87,7 +91,16 @@ class Settings:
 
     @property
     def frontend_url(self) -> str:
-        return os.getenv("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+        return self._normalize_origin(
+            os.getenv("FRONTEND_URL", "http://localhost:5173")
+        )
+
+    @staticmethod
+    def _normalize_origin(origin: str) -> str:
+        origin = origin.rstrip("/")
+        if not origin.startswith(("http://", "https://")):
+            return f"https://{origin}"
+        return origin
 
 
 settings = Settings()

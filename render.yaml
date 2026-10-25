@@ -1,0 +1,45 @@
+services:
+  - type: web
+    name: codegrading-frontend
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && VITE_API_BASE_URL=https://$API_HOST npm run build
+    staticPublishPath: dist
+    envVars:
+      - key: API_HOST
+        fromService:
+          type: web
+          name: codegrading-backend
+          property: host
+
+  - type: web
+    name: codegrading-backend
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    dockerCommand: python render_start.py
+    healthCheckPath: /
+    disk:
+      name: codegrading-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_PATH
+        value: /var/data/codegrading.db
+      - key: RABBITMQ_URL
+        sync: false
+      - key: AUTH_SECRET_KEY
+        generateValue: true
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: FRONTEND_URL
+        fromService:
+          type: web
+          name: codegrading-frontend
+          property: host
+      - key: CORS_ORIGINS
+        fromService:
+          type: web
+          name: codegrading-frontend
+          property: host

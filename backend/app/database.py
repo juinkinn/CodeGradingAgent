@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from alembic import command
@@ -6,7 +7,12 @@ from sqlalchemy import URL, create_engine, inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 
-DATABASE_PATH = Path(__file__).resolve().parents[1] / "codegrading.db"
+DATABASE_PATH = Path(
+    os.getenv(
+        "DATABASE_PATH",
+        str(Path(__file__).resolve().parents[1] / "codegrading.db"),
+    )
+)
 DATABASE_URL = URL.create("sqlite", database=str(DATABASE_PATH))
 
 engine = create_engine(

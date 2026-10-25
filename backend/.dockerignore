@@ -1,0 +1,8 @@
+.env
+.ruff_cache
+.deepeval
+codegrading.db
+evaluation/results
+test
+__pycache__
+*.py[cod]

@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+**/*.py[cod]
+**/.ruff_cache
+backend/.env
+backend/codegrading.db
+backend/.deepeval
+backend/evaluation/results
+backend/test
+frontend/node_modules
+frontend/dist
+frontend/.env
