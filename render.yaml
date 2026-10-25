@@ -54,15 +54,9 @@ services:
       - key: AUTH_COOKIE_SECURE
         value: "true"
       - key: FRONTEND_URL
-        fromService:
-          type: web
-          name: codegrading-frontend
-          property: host
+        value: https://codegrading-frontend.onrender.com
       - key: CORS_ORIGINS
-        fromService:
-          type: web
-          name: codegrading-frontend
-          property: host
+        value: https://codegrading-frontend.onrender.com
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
