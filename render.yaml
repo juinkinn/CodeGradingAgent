@@ -37,6 +37,14 @@ services:
         value: https://cloud.langfuse.com
       - key: LANGFUSE_PROMPT_LABEL
         value: production
+      - key: OTEL_SERVICE_NAME
+        value: codegradingagent-api
+      - key: OTEL_EXPORTER_OTLP_ENDPOINT
+        sync: false
+      - key: OTEL_EXPORTER_OTLP_PROTOCOL
+        value: http/protobuf
+      - key: OTEL_EXPORTER_OTLP_HEADERS
+        sync: false
       - key: SUBMISSION_UPLOAD_QUEUE
         value: submission_uploads
       - key: AUTH_SECRET_KEY
@@ -55,3 +63,7 @@ services:
           type: web
           name: codegrading-frontend
           property: host
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

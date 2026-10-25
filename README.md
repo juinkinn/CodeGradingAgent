@@ -42,6 +42,10 @@ When Render prompts for environment values, provide its AMQP URL as
 are required for the grading-agent features. The Blueprint sets the model,
 Langfuse URL/label, and upload queue defaults, generates `AUTH_SECRET_KEY`,
 and links the frontend URL to the backend's CORS and OAuth settings.
+`GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` enable optional Google sign-in;
+leave them blank if you do not use it. Configure the Google OAuth redirect URI
+as `https://<backend-host>/auth/google/callback`. The OTLP endpoint and headers
+are also optional; leave them blank if you do not export telemetry to Grafana.
 Render's Free web service may take about a minute to wake after being idle.
 
 ## Run tests
