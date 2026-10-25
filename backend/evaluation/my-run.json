@@ -1,0 +1,111 @@
+{
+  "generated_at": "2026-10-25T06:29:26.613538+00:00",
+  "dataset": "D:\\Edrive\\FMI\\CodeGradingAgent\\backend\\evaluation\\golden_cases.json",
+  "agent_model": "Gemini (gemini-3.1-flash-lite)",
+  "judge_model": "Gemini (gemini-3.1-flash-lite)",
+  "summary": {
+    "case_count": 4,
+    "action_accuracy": 1.0,
+    "mean_judge_score": 1.0,
+    "mean_token_f1": 0.4772428027472332,
+    "mean_rouge_l": 0.4640849080103911,
+    "mean_agent_duration_seconds": 20.174146549999932,
+    "mean_judge_duration_seconds": 3.9793775500002084,
+    "passed": true
+  },
+  "cases": [
+    {
+      "id": "answer-assignment-question",
+      "expected_action": "response",
+      "actual_action": "response",
+      "action_correct": true,
+      "judge_score": 1.0,
+      "judge_passed": true,
+      "judge_reason": "The agent correctly identified the assignment requirements based on the provided context and provided a concise, accurate response without attempting to grade or create a rubric, fully aligning with the expected output.",
+      "agent_duration_seconds": 15.516443900000013,
+      "judge_duration_seconds": 3.3630086999983178,
+      "token_f1": 0.8823529411764706,
+      "rouge_l": 0.8823529411764706,
+      "actual_output": {
+        "action": "response",
+        "response": "This assignment asks students to write a Python function that calculates and returns the sum of two integers."
+      }
+    },
+    {
+      "id": "create-rubric",
+      "expected_action": "rubric",
+      "actual_action": "rubric",
+      "action_correct": true,
+      "judge_score": 1.0,
+      "judge_passed": true,
+      "judge_reason": "The agent successfully created a 10-point rubric as requested. The criteria are clear, the point distribution is accurate, and the agent avoided making any false claims regarding the saving or approval of the rubric.",
+      "agent_duration_seconds": 11.809607100003632,
+      "judge_duration_seconds": 2.1416728000040166,
+      "token_f1": 0.2105263157894737,
+      "rouge_l": 0.15789473684210525,
+      "actual_output": {
+        "action": "rubric",
+        "response": "This rubric evaluates the function based on correct implementation, proper syntax, and adherence to naming conventions.",
+        "rubric": {
+          "Correctness": {
+            "description": "The function correctly returns the sum of two input integers.",
+            "points": 6
+          },
+          "Syntax": {
+            "description": "The code follows Python syntax rules and executes without errors.",
+            "points": 2
+          },
+          "Naming and Style": {
+            "description": "The function uses descriptive names and follows PEP 8 naming conventions.",
+            "points": 2
+          }
+        }
+      }
+    },
+    {
+      "id": "select-submission",
+      "expected_action": "submissions",
+      "actual_action": "submissions",
+      "action_correct": true,
+      "judge_score": 1.0,
+      "judge_passed": true,
+      "judge_reason": "The agent correctly identified the requested file (ID 11), performed the appropriate action to attach it, and provided a clear response to the instructor without attempting to grade the submission prematurely.",
+      "agent_duration_seconds": 15.328069499999401,
+      "judge_duration_seconds": 4.39195479999762,
+      "token_f1": 0.4827586206896552,
+      "rouge_l": 0.4827586206896552,
+      "actual_output": {
+        "action": "submissions",
+        "response": "I have attached solution.py (ID 11) to the current grading session.",
+        "add_submission_ids": [
+          11
+        ],
+        "remove_submission_ids": []
+      }
+    },
+    {
+      "id": "grade-attached-submission",
+      "expected_action": "grades",
+      "actual_action": "grades",
+      "action_correct": true,
+      "judge_score": 1.0,
+      "judge_passed": true,
+      "judge_reason": "The agent correctly identified the submission, applied the rubric accurately, and provided the expected score of 10. It avoided making any unsupported claims regarding the saving or approval of the grade, adhering to all evaluation steps.",
+      "agent_duration_seconds": 38.04246569999668,
+      "judge_duration_seconds": 6.020873900000879,
+      "token_f1": 0.3333333333333333,
+      "rouge_l": 0.3333333333333333,
+      "actual_output": {
+        "action": "grades",
+        "response": "Submission 21: The submission correctly implements the add function as required by the rubric.",
+        "grades": [
+          {
+            "submission_id": 21,
+            "score": 10.0,
+            "feedback": "The implementation correctly returns the sum of a and b, meeting all requirements."
+          }
+        ]
+      }
+    }
+  ]
+}

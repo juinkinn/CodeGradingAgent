@@ -1,0 +1,8 @@
+backend/codegrading.db
+backend/.env
+frontend/.env
+frontend/node_modules/
+frontend/dist/
+backend/evaluation/results/
+__pycache__/
+*.py[cod]

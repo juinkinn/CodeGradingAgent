@@ -1,0 +1,68 @@
+[
+  {
+    "id": "answer-assignment-question",
+    "context": "Assignment title: Intro Python. Description: Write a function that returns the sum of two integers. Language: python. Score range: 0 to 10. Assignment rubric: correctness 10 points. Attached submissions: 0. Attached submission IDs: (none). Available submissions: ID 11 (solution.py). Current proposal: (none). Auto-approve enabled: False.",
+    "history": [
+      ["user", "What is this assignment asking students to build?"]
+    ],
+    "has_submissions": false,
+    "submissions": [],
+    "available_submissions": [
+      {"submission_id": 11, "filename": "solution.py"}
+    ],
+    "expected_action": "response",
+    "expected_output": "Explain that the assignment asks students to write a Python function that returns the sum of two integers. Do not create a rubric or grade a submission.",
+    "expected_response": "The assignment asks students to write a Python function that returns the sum of two integers."
+  },
+  {
+    "id": "create-rubric",
+    "context": "Assignment title: Intro Python. Description: Write a function that returns the sum of two integers. Language: python. Score range: 0 to 10. Assignment rubric: None. Session grading rubric: (not set). Rubric to use: None. Rubric available for grading: no. Attached submissions: 0. Available submissions: (none). Current proposal: (none). Auto-approve enabled: False.",
+    "history": [
+      ["user", "Create a rubric out of 10 points for this assignment."]
+    ],
+    "has_submissions": false,
+    "submissions": [],
+    "available_submissions": [],
+    "expected_action": "rubric",
+    "expected_output": "Return a proposed rubric with clear criteria and descriptions whose point weights total 10. Do not grade code and do not claim that the rubric was saved or approved.",
+    "expected_response": "The rubric should award a total of 10 points and assess whether the Python function correctly returns the sum of two integers."
+  },
+  {
+    "id": "select-submission",
+    "context": "Assignment title: Intro Python. Description: Write a function that returns the sum of two integers. Language: python. Score range: 0 to 10. Assignment rubric: correctness 10 points. Attached submissions: 0. Attached submission IDs: (none). Available submissions: ID 11 (solution.py), ID 12 (test.py). Current proposal: (none). Auto-approve enabled: False.",
+    "history": [
+      ["user", "Attach solution.py to this grading session."]
+    ],
+    "has_submissions": false,
+    "submissions": [],
+    "available_submissions": [
+      {"submission_id": 11, "filename": "solution.py"},
+      {"submission_id": 12, "filename": "test.py"}
+    ],
+    "expected_action": "submissions",
+    "expected_output": "Choose the submissions action, add submission ID 11 only, and tell the instructor it is attached. Do not grade it in the same step.",
+    "expected_response": "I attached solution.py (submission 11). You can ask me to grade it in the next message."
+  },
+  {
+    "id": "grade-attached-submission",
+    "context": "Assignment title: Add two integers. Description: Implement add(a, b) returning a + b. Language: python. Score range: 0 to 10. Assignment rubric: correctness 10 points for a correct sum. Rubric available for grading: yes. Attached submissions: 1. Attached submission IDs: 21 (answer.py). Current proposal: (none). Auto-approve enabled: False.",
+    "history": [
+      ["user", "Grade the attached submission using the assignment rubric."]
+    ],
+    "has_submissions": true,
+    "submissions": [
+      {
+        "submission_id": 21,
+        "filename": "answer.py",
+        "current_score": null,
+        "source_code": "def add(a, b):\n    return a + b\n"
+      }
+    ],
+    "available_submissions": [
+      {"submission_id": 21, "filename": "answer.py"}
+    ],
+    "expected_action": "grades",
+    "expected_output": "Return exactly one grade for attached submission 21. The implementation correctly returns a + b, so award 10 out of 10 under the provided correctness rubric. Explain this evidence and do not claim the score was saved or approved.",
+    "expected_response": "Submission 21: The function returns a + b, which meets the assignment requirement. Proposed score: 10/10."
+  }
+]
