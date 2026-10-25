@@ -35,13 +35,14 @@ web-service plan and does not require a persistent disk or payment method.
 This is suitable only for demos: the backend can spin down after inactivity,
 and the SQLite database is lost when it spins down, restarts, or redeploys.
 
-Before deploying, create an external RabbitMQ broker (for example, CloudAMQP)
-and provide its AMQP URL as `RABBITMQ_URL` when Render prompts for it. The
-Blueprint generates `AUTH_SECRET_KEY` and links the frontend URL to the
-backend's CORS and OAuth settings. Add `GEMINI_API_KEY` and the Langfuse
-credentials in the backend service's environment if grading-agent features
-are needed. Render's Free web service may take about a minute to wake after
-being idle.
+Before deploying, create an external RabbitMQ broker (for example, CloudAMQP).
+When Render prompts for environment values, provide its AMQP URL as
+`RABBITMQ_URL`, your Gemini key as `GEMINI_API_KEY`, and your Langfuse keys as
+`LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`. These Gemini and Langfuse keys
+are required for the grading-agent features. The Blueprint sets the model,
+Langfuse URL/label, and upload queue defaults, generates `AUTH_SECRET_KEY`,
+and links the frontend URL to the backend's CORS and OAuth settings.
+Render's Free web service may take about a minute to wake after being idle.
 
 ## Run tests
 
