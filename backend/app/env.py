@@ -82,6 +82,10 @@ class Settings:
         return os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true"
 
     @property
+    def auth_cookie_samesite(self) -> str:
+        return "none" if self.auth_cookie_secure else "lax"
+
+    @property
     def google_client_id(self) -> str | None:
         return os.getenv("GOOGLE_CLIENT_ID") or None
 

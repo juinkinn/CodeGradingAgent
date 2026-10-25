@@ -138,7 +138,7 @@ def _set_session_cookie(response: Response, user: User) -> None:
         max_age=settings.auth_session_max_age,
         httponly=True,
         secure=settings.auth_cookie_secure,
-        samesite="lax",
+        samesite=settings.auth_cookie_samesite,
         path="/",
     )
 
@@ -225,7 +225,7 @@ def logout(request: FastAPIRequest, response: Response):
         path="/",
         secure=settings.auth_cookie_secure,
         httponly=True,
-        samesite="lax",
+        samesite=settings.auth_cookie_samesite,
     )
     response.status_code = 204
     return response
@@ -342,7 +342,7 @@ def google_callback(
             max_age=settings.auth_session_max_age,
             httponly=True,
             secure=settings.auth_cookie_secure,
-            samesite="lax",
+            samesite=settings.auth_cookie_samesite,
             path="/",
         )
         response.delete_cookie(**clear_cookie)
