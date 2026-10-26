@@ -44,11 +44,20 @@ class DatabaseMigrationTests(unittest.TestCase):
                 {column["name"] for column in inspector.get_columns("grading_sessions")}
             )
         )
+        self.assertIn(
+            "queued_at",
+            {
+                column["name"]
+                for column in inspect(self.engine).get_columns(
+                    "submission_upload_batches"
+                )
+            },
+        )
         with self.engine.connect() as connection:
             version = connection.execute(
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
-        self.assertEqual(version, "20261025_0004")
+        self.assertEqual(version, "20261026_0005")
 
     def test_existing_unversioned_database_is_adopted_without_losing_rows(self):
         config = Config(str(database.BACKEND_DIR / "alembic.ini"))
@@ -74,7 +83,7 @@ class DatabaseMigrationTests(unittest.TestCase):
                 text("SELECT version_num FROM alembic_version")
             ).scalar_one()
         self.assertEqual(title, "Legacy assignment")
-        self.assertEqual(version, "20261025_0004")
+        self.assertEqual(version, "20261026_0005")
         self.assertIn(
             "grading_rubric",
             {

@@ -1,4 +1,3 @@
-import base64
 from urllib.parse import unquote, urlsplit
 
 from fastapi import FastAPI
