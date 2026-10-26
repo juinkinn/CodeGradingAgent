@@ -105,7 +105,7 @@ Langfuse tracing and OpenTelemetry telemetry exported to Grafana Cloud help moni
 
 ### LLM Tracing — Langfuse
 
-![Langfuse traces](docs/images/langfuse.png)
+![Langfuse traces](docs/images/langfuse.PNG)
 
 ### Application Telemetry — Grafana Cloud
 
