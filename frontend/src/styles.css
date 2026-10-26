@@ -933,6 +933,85 @@ textarea:focus {
   font-size: 10px;
 }
 
+.upload-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.upload-progress-label {
+  display: flex;
+  justify-content: space-between;
+  color: #66687b;
+  font-size: 10px;
+}
+
+.upload-progress-label strong {
+  color: var(--purple);
+}
+
+.upload-progress progress,
+.upload-queue-progress progress {
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: #ece9ff;
+  accent-color: var(--purple);
+}
+
+.upload-progress progress::-webkit-progress-bar,
+.upload-queue-progress progress::-webkit-progress-bar {
+  border-radius: 8px;
+  background: #ece9ff;
+}
+
+.upload-progress progress::-webkit-progress-value,
+.upload-queue-progress progress::-webkit-progress-value {
+  border-radius: 8px;
+  background: var(--purple);
+  transition: width 150ms ease;
+}
+
+.upload-progress progress::-moz-progress-bar,
+.upload-queue-progress progress::-moz-progress-bar {
+  border-radius: 8px;
+  background: var(--purple);
+}
+
+.upload-queue-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.upload-progress-indeterminate {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #ece9ff;
+}
+
+.upload-progress-indeterminate::after {
+  position: absolute;
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--purple);
+  animation: upload-progress-slide 1.2s ease-in-out infinite;
+  content: "";
+}
+
+@keyframes upload-progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(250%);
+  }
+}
+
 .button-upload {
   background: #ece9ff;
   color: #5140b9;
@@ -987,17 +1066,59 @@ textarea:focus {
 
 .submission-item {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 9px;
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: 9px;
   background: white;
-  cursor: pointer;
 }
 
 .submission-item input {
   accent-color: var(--purple);
+}
+
+.submission-bulk-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  font-size: 10px;
+}
+
+.submission-bulk-actions label {
+  display: inline-flex;
+  align-items: center;
+  grid-column: 1 / -1;
+  gap: 6px;
+  color: #66687b;
+}
+
+.submission-bulk-actions input {
+  accent-color: var(--purple);
+}
+
+.submission-action-button,
+.submission-delete-button {
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  color: #5140b9;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.submission-action-button:hover:not(:disabled) {
+  border-color: #cbc5f4;
+  background: #fbfaff;
+}
+
+.submission-action-button:disabled,
+.submission-delete-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .file-icon {
@@ -1015,6 +1136,7 @@ textarea:focus {
 .submission-name {
   display: grid;
   min-width: 0;
+  flex: 1;
   gap: 3px;
 }
 
@@ -1028,6 +1150,17 @@ textarea:focus {
 .submission-name small {
   color: var(--muted);
   font-size: 10px;
+}
+
+.submission-delete-button {
+  border: 1px solid #f0d9dc;
+  background: #fff8f8;
+  color: #a33d49;
+}
+
+.submission-delete-button:hover:not(:disabled) {
+  border-color: #e7bfc4;
+  background: #fff1f2;
 }
 
 .empty-note {

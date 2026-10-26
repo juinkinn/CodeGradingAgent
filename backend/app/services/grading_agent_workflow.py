@@ -40,7 +40,12 @@ def _pending_rubric_change(session: GradingSession) -> dict | None:
     return None
 
 
-def _build_context(db: Session, session: GradingSession) -> str:
+def _build_context(
+    db: Session,
+    session: GradingSession,
+    *,
+    include_submission_lists: bool = True,
+) -> str:
     assignment = db.query(Assignment).filter_by(id=session.assignment_id).first()
     if assignment is None:
         raise ValueError("Assignment not found")
@@ -66,37 +71,38 @@ def _build_context(db: Session, session: GradingSession) -> str:
         f"Rubric available for grading: {'yes' if effective_rubric is not None else 'no'}",
     ]
 
-    links = (
-        db.query(SessionSubmission, Submission)
-        .join(Submission, Submission.id == SessionSubmission.submission_id)
-        .filter(SessionSubmission.session_id == session.id)
-        .order_by(SessionSubmission.id)
-        .all()
-    )
-    context_parts.append(f"Attached submissions: {len(links)}")
-    context_parts.append(
-        "Attached submission IDs: "
-        + (
-            ", ".join(
-                f"{submission.id} ({submission.filename or 'unnamed file'})"
-                for _, submission in links
-            )
-            if links
-            else "(none)"
+    if include_submission_lists:
+        links = (
+            db.query(SessionSubmission, Submission)
+            .join(Submission, Submission.id == SessionSubmission.submission_id)
+            .filter(SessionSubmission.session_id == session.id)
+            .order_by(SessionSubmission.id)
+            .all()
         )
-    )
-    options = _get_submission_options(db, session)
-    context_parts.append(
-        "Available submissions: "
-        + (
-            ", ".join(
-                f"ID {item['submission_id']} ({item['filename'] or 'unnamed file'})"
-                for item in options
+        context_parts.append(f"Attached submissions: {len(links)}")
+        context_parts.append(
+            "Attached submission IDs: "
+            + (
+                ", ".join(
+                    f"{submission.id} ({submission.filename or 'unnamed file'})"
+                    for _, submission in links
+                )
+                if links
+                else "(none)"
             )
-            if options
-            else "(none)"
         )
-    )
+        options = _get_submission_options(db, session)
+        context_parts.append(
+            "Available submissions: "
+            + (
+                ", ".join(
+                    f"ID {item['submission_id']} ({item['filename'] or 'unnamed file'})"
+                    for item in options
+                )
+                if options
+                else "(none)"
+            )
+        )
 
     context_parts.append(f"Current proposal: {session.proposal or '(none)'}")
     context_parts.append(f"Auto-approve enabled: {session.auto_approve}")
@@ -310,8 +316,16 @@ def chat_with_agent(
     ]
     submission_context = _get_submission_context(db, session)
     available_submissions = _get_submission_options(db, session)
+    context = _build_context(db, session)
+    focused_context = _build_context(
+        db,
+        session,
+        include_submission_lists=False,
+    )
     decision = run_grading_agent(
-        context=_build_context(db, session),
+        context=context,
+        routing_context=focused_context,
+        grading_context=focused_context,
         history=history,
         session_id=session.id,
         has_submissions=bool(submission_context),

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import (
     APIRouter,
     Depends,
@@ -20,6 +22,8 @@ from app.infrastructure.rabbitmq import (
     publish_submission_upload,
 )
 from app.schemas.submission import (
+    SubmissionBulkDeleteRequest,
+    SubmissionBulkDeleteResponse,
     SubmissionCreate,
     SubmissionResponse,
     SubmissionUpdate,
@@ -34,6 +38,7 @@ from app.services.submission_upload import (
 
 
 router = APIRouter(tags=["submissions"])
+logger = logging.getLogger(__name__)
 
 
 def _read_uploads(files: list[UploadFile]) -> list[tuple[str, bytes]]:
@@ -123,7 +128,14 @@ def upload_assignment_submissions(
                 "retry_endpoint": f"/submission-upload-batches/{batch.id}/retry",
             },
         ) from exc
-    return batch
+    queued_at = submission_upload_crud.mark_batch_queued(db, batch.id)
+    logger.info(
+        "Submission upload batch queued: batch_id=%s assignment_id=%s queued_at=%s",
+        batch.id,
+        assignment_id,
+        queued_at.isoformat(timespec="milliseconds") + "Z",
+    )
+    return submission_upload_crud.get_batch(db, batch.id)
 
 
 @router.get(
@@ -181,6 +193,13 @@ def retry_submission_upload_batch(batch_id: int, db: Session = Depends(get_db)):
                 "retry_endpoint": f"/submission-upload-batches/{batch.id}/retry",
             },
         ) from exc
+    queued_at = submission_upload_crud.mark_batch_queued(db, batch.id)
+    logger.info(
+        "Submission upload batch queued: batch_id=%s assignment_id=%s queued_at=%s retry=true",
+        batch.id,
+        batch.assignment_id,
+        queued_at.isoformat(timespec="milliseconds") + "Z",
+    )
     return submission_upload_crud.get_batch(db, batch_id)
 
 
@@ -209,6 +228,24 @@ def get_submission(submission_id: int, db: Session = Depends(get_db)):
             detail="Submission not found",
         )
     return submission
+
+
+@router.post(
+    "/submissions/bulk-delete",
+    response_model=SubmissionBulkDeleteResponse,
+)
+def bulk_delete_submissions(
+    data: SubmissionBulkDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    submissions = submission_crud.get_many(db, data.ids)
+    if len(submissions) != len(data.ids):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="One or more submissions were not found.",
+        )
+    deleted_ids = submission_crud.delete_many(db, submissions)
+    return SubmissionBulkDeleteResponse(deleted_ids=deleted_ids)
 
 
 @router.patch(

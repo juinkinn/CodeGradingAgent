@@ -68,6 +68,7 @@ type UploadBatch = {
   assignment_id: number;
   status: string;
   created_at: string;
+  queued_at: string | null;
   items: {
     id: number;
     filename: string;
@@ -76,6 +77,34 @@ type UploadBatch = {
     submission_id: number | null;
   }[];
 };
+
+type StoredUploadBatch = {
+  id: number;
+  assignment_id: number;
+};
+
+function uploadBatchStorageKey(userId: number): string {
+  return `codegrading:last-upload-batch:${userId}`;
+}
+
+function formatQueuedAt(value: string): string {
+  const date = new Date(
+    /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`,
+  );
+  return new Intl.DateTimeFormat("vi-VN", {
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(date);
+}
+
+function secondsSinceQueued(value: string | null): number | null {
+  if (!value) return null;
+  const timestamp = new Date(
+    /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : `${value}Z`,
+  ).getTime();
+  if (!Number.isFinite(timestamp)) return null;
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+}
 
 class ApiError extends Error {
   constructor(
@@ -113,6 +142,58 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
+}
+
+function uploadWithProgress<T>(
+  path: string,
+  body: FormData,
+  onProgress: (progress: number) => void,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open("POST", `${API_BASE_URL}${path}`);
+    request.withCredentials = true;
+    request.upload.addEventListener("progress", (event) => {
+      if (event.lengthComputable) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    });
+    request.addEventListener("load", () => {
+      let responseBody: { detail?: unknown } & T;
+      try {
+        responseBody = JSON.parse(request.responseText) as { detail?: unknown } & T;
+      } catch {
+        reject(new Error("Máy chủ trả về phản hồi không hợp lệ."));
+        return;
+      }
+      if (request.status < 200 || request.status >= 300) {
+        const detail = responseBody.detail;
+        reject(
+          new ApiError(
+            typeof detail === "string"
+              ? detail
+              : typeof detail === "object" &&
+                  detail !== null &&
+                  "message" in detail &&
+                  typeof detail.message === "string"
+                ? detail.message
+                : `Request failed (${request.status})`,
+            request.status,
+            detail,
+          ),
+        );
+        return;
+      }
+      resolve(responseBody);
+    });
+    request.addEventListener("error", () => {
+      reject(new Error("Không thể kết nối máy chủ để upload."));
+    });
+    request.addEventListener("abort", () => {
+      reject(new Error("Upload đã bị hủy."));
+    });
+    request.send(body);
+  });
 }
 
 async function streamChat(
@@ -311,6 +392,8 @@ function App() {
   const [assignmentDetailsExpanded, setAssignmentDetailsExpanded] =
     useState(false);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [selectedForActions, setSelectedForActions] = useState<number[]>([]);
+  const [deletingSubmissions, setDeletingSubmissions] = useState(false);
   const [selectedSubmissionIds, setSelectedSubmissionIds] = useState<number[]>([]);
   const [updatingSubmissionSelection, setUpdatingSubmissionSelection] =
     useState(false);
@@ -333,6 +416,10 @@ function App() {
   const [editMaxScore, setEditMaxScore] = useState("10");
   const [editRubric, setEditRubric] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [uploadPhase, setUploadPhase] = useState<"uploading" | "queueing" | null>(
+    null,
+  );
   const [uploadBatch, setUploadBatch] = useState<UploadBatch | null>(null);
   const [uploadNeedsRetry, setUploadNeedsRetry] = useState(false);
   const [draft, setDraft] = useState("");
@@ -371,6 +458,10 @@ function App() {
   const uploadInProgress = ["QUEUED", "PROCESSING"].includes(
     uploadBatch?.status ?? "",
   );
+  const queuedWaitSeconds =
+    uploadBatch?.status === "QUEUED"
+      ? secondsSinceQueued(uploadBatch.queued_at)
+      : null;
 
   useEffect(() => {
     if (!currentUser) return;
@@ -380,6 +471,83 @@ function App() {
       })
       .catch((reason: Error) => setError(reason.message));
   }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const storageKey = uploadBatchStorageKey(currentUser.id);
+    let storedValue: string | null;
+    try {
+      storedValue = localStorage.getItem(storageKey);
+    } catch (reason) {
+      setError((reason as Error).message);
+      return;
+    }
+    if (!storedValue) return;
+
+    let storedBatch: StoredUploadBatch;
+    try {
+      const parsed: unknown = JSON.parse(storedValue);
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        !("id" in parsed) ||
+        typeof parsed.id !== "number" ||
+        !Number.isInteger(parsed.id) ||
+        !("assignment_id" in parsed) ||
+        typeof parsed.assignment_id !== "number" ||
+        !Number.isInteger(parsed.assignment_id)
+      ) {
+        throw new Error("Thông tin batch upload đã lưu không hợp lệ.");
+      }
+      storedBatch = {
+        id: parsed.id,
+        assignment_id: parsed.assignment_id,
+      };
+    } catch (reason) {
+      try {
+        localStorage.removeItem(storageKey);
+      } catch (storageError) {
+        setError((storageError as Error).message);
+        return;
+      }
+      setError((reason as Error).message);
+      return;
+    }
+
+    setAssignmentId(storedBatch.assignment_id);
+    setPage("detail");
+    api<UploadBatch>(`/submission-upload-batches/${storedBatch.id}`)
+      .then((batch) => {
+        if (batch.assignment_id !== storedBatch.assignment_id) {
+          throw new Error("Batch upload đã lưu không khớp assignment.");
+        }
+        setUploadBatch(batch);
+        setUploadNeedsRetry(false);
+        if (["COMPLETED", "COMPLETED_WITH_ERRORS"].includes(batch.status)) {
+          return api<Submission[]>(
+            `/assignments/${batch.assignment_id}/submissions`,
+          ).then(setSubmissions);
+        }
+        return undefined;
+      })
+      .catch((reason: Error) => setError(reason.message));
+  }, [currentUser?.id]);
+
+  useEffect(() => {
+    if (!currentUser || !uploadBatch) return;
+    try {
+      localStorage.setItem(
+        uploadBatchStorageKey(currentUser.id),
+        JSON.stringify({
+          id: uploadBatch.id,
+          assignment_id: uploadBatch.assignment_id,
+        }),
+      );
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
+  }, [currentUser?.id, uploadBatch?.id, uploadBatch?.assignment_id]);
 
   useEffect(() => {
     if (!assignmentId) {
@@ -481,12 +649,22 @@ function App() {
     };
   }, [openAssignmentMenuId]);
 
-  async function toggleSubmission(id: number) {
-    if (!activeSession || updatingSubmissionSelection || pendingProposal) return;
+  async function updateSelectedSubmissionAttachments(attach: boolean) {
+    if (
+      !activeSession ||
+      !selectedForActions.length ||
+      updatingSubmissionSelection ||
+      pendingProposal
+    ) {
+      return;
+    }
     const previousIds = activeSession.submission_ids;
-    const submissionIds = previousIds.includes(id)
-      ? previousIds.filter((selectedId) => selectedId !== id)
-      : [...previousIds, id];
+    const selectedIds = new Set(selectedForActions);
+    const submissionIds = attach
+      ? [...new Set([...previousIds, ...selectedForActions])]
+      : previousIds.filter((id) => !selectedIds.has(id));
+    if (submissionIds.length === previousIds.length) return;
+
     setUpdatingSubmissionSelection(true);
     setSelectedSubmissionIds(submissionIds);
     setError("");
@@ -513,6 +691,66 @@ function App() {
     }
   }
 
+  function toggleActionSelection(id: number) {
+    setSelectedForActions((current) =>
+      current.includes(id)
+        ? current.filter((selectedId) => selectedId !== id)
+        : [...current, id],
+    );
+  }
+
+  async function deleteSelectedSubmissions() {
+    if (!selectedForActions.length || deletingSubmissions) return;
+    const count = selectedForActions.length;
+    if (
+      !window.confirm(
+        `Xóa ${count} bài nộp đã chọn? Các bài này cũng sẽ bị gỡ khỏi phiên chấm. Thao tác này không thể hoàn tác.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingSubmissions(true);
+    setError("");
+    try {
+      const result = await api<{ deleted_ids: number[] }>(
+        "/submissions/bulk-delete",
+        {
+          method: "POST",
+          body: JSON.stringify({ ids: selectedForActions }),
+        },
+      );
+      const deletedIds = new Set(result.deleted_ids);
+      setSubmissions((current) =>
+        current.filter((item) => !deletedIds.has(item.id)),
+      );
+      setSelectedForActions((current) =>
+        current.filter((id) => !deletedIds.has(id)),
+      );
+      setSelectedSubmissionIds((current) =>
+        current.filter((id) => !deletedIds.has(id)),
+      );
+      setActiveSession((current) =>
+        current
+          ? {
+              ...current,
+              submission_ids: current.submission_ids.filter((id) => !deletedIds.has(id)),
+            }
+          : current,
+      );
+      setSessions((current) =>
+        current.map((session) => ({
+          ...session,
+          submission_ids: session.submission_ids.filter((id) => !deletedIds.has(id)),
+        })),
+      );
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setDeletingSubmissions(false);
+    }
+  }
+
   function selectAssignment(id: number) {
     setAssignmentId(id);
     setAssignmentDetailsExpanded(false);
@@ -522,6 +760,7 @@ function App() {
     setSessionId("");
     setActiveSession(null);
     setSelectedSubmissionIds([]);
+    setSelectedForActions([]);
     setUploadBatch(null);
     setSelectedFiles([]);
   }
@@ -702,13 +941,19 @@ function App() {
     event.preventDefault();
     if (!assignmentId || !selectedFiles.length || loading) return;
     setLoading(true);
+    setUploadProgress(0);
+    setUploadPhase("uploading");
     setError("");
     try {
       const body = new FormData();
       selectedFiles.forEach((file) => body.append("files", file));
-      const batch = await api<UploadBatch>(
+      const batch = await uploadWithProgress<UploadBatch>(
         `/assignments/${assignmentId}/submissions/upload`,
-        { method: "POST", body },
+        body,
+        (progress) => {
+          setUploadProgress(progress);
+          if (progress === 100) setUploadPhase("queueing");
+        },
       );
       setUploadBatch(batch);
       setSelectedFiles([]);
@@ -716,6 +961,8 @@ function App() {
     } catch (reason) {
       showUploadError(reason);
     } finally {
+      setUploadProgress(null);
+      setUploadPhase(null);
       setLoading(false);
     }
   }
@@ -1237,12 +1484,93 @@ function App() {
                   {selectedFiles.map((file) => <li key={`${file.name}-${file.size}`}>{file.name}</li>)}
                 </ul>
               )}
+              {uploadPhase !== null && uploadProgress !== null && (
+                <div className="upload-progress" role="status">
+                  <div className="upload-progress-label">
+                    <span>
+                      {uploadPhase === "queueing"
+                        ? "Đang đưa bài nộp vào queue..."
+                        : "Đang gửi file lên máy chủ..."}
+                    </span>
+                    {uploadPhase === "uploading" && (
+                      <strong>{uploadProgress}%</strong>
+                    )}
+                  </div>
+                  {uploadPhase === "queueing" ? (
+                    <div
+                      className="upload-progress-indeterminate"
+                      role="progressbar"
+                      aria-label="Đang đưa bài nộp vào queue"
+                    />
+                  ) : (
+                    <progress
+                      aria-label="Tiến độ upload bài nộp"
+                      max={100}
+                      value={uploadProgress}
+                    />
+                  )}
+                </div>
+              )}
               <button className="button button-upload full-width" disabled={!selectedFiles.length || loading}>
                 {loading ? "Đang upload..." : `Upload ${selectedFiles.length || ""} file`}
               </button>
               {uploadBatch && (
                 <div className="upload-status" role="status">
                   <strong>Batch #{uploadBatch.id}: {uploadBatch.status}</strong>
+                  <small>
+                    {uploadBatch.queued_at
+                      ? `Đưa vào queue lúc ${formatQueuedAt(uploadBatch.queued_at)}`
+                      : "Chưa ghi nhận thời điểm đưa vào queue"}
+                  </small>
+                  {uploadBatch.status === "QUEUED" && !uploadNeedsRetry && (
+                    <div className="upload-queue-progress">
+                      <small>
+                        Đang chờ worker nhận batch từ queue
+                        {queuedWaitSeconds !== null
+                          ? ` · ${queuedWaitSeconds} giây`
+                          : "..."}
+                      </small>
+                      <div
+                        className="upload-progress-indeterminate"
+                        role="progressbar"
+                        aria-label="Batch đang chờ được xử lý"
+                      />
+                      {queuedWaitSeconds !== null && queuedWaitSeconds >= 30 && (
+                        <>
+                          <small>
+                            Batch đang chờ lâu; worker có thể chưa hoạt động.
+                            Bạn có thể thử gửi lại vào queue.
+                          </small>
+                          <button
+                            className="button button-upload"
+                            type="button"
+                            onClick={retryUpload}
+                            disabled={loading}
+                          >
+                            Thử gửi lại vào queue
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {uploadBatch.status === "PROCESSING" && (
+                    <div className="upload-queue-progress">
+                      <small>
+                        Đang xử lý:{" "}
+                        {uploadBatch.items.filter((item) =>
+                          ["COMPLETED", "FAILED"].includes(item.status),
+                        ).length}
+                        /{uploadBatch.items.length} file
+                      </small>
+                      <progress
+                        aria-label="Tiến độ xử lý batch"
+                        max={uploadBatch.items.length}
+                        value={uploadBatch.items.filter((item) =>
+                          ["COMPLETED", "FAILED"].includes(item.status),
+                        ).length}
+                      />
+                    </div>
+                  )}
                   {uploadNeedsRetry && (
                     <button
                       className="button button-upload"
@@ -1313,6 +1641,76 @@ function App() {
                 <h2>Bài đã upload</h2>
                 <span className="count-pill">{submissions.length}</span>
               </div>
+              {submissions.length > 0 && (
+                <div className="submission-bulk-actions">
+                  <label>
+                    <input
+                      type="checkbox"
+                      aria-label="Chọn tất cả bài nộp"
+                      checked={
+                        submissions.length > 0 &&
+                        selectedForActions.length === submissions.length
+                      }
+                      disabled={deletingSubmissions}
+                      onChange={(event) =>
+                        setSelectedForActions(
+                          event.target.checked
+                            ? submissions.map((submission) => submission.id)
+                            : [],
+                        )
+                      }
+                    />
+                    Chọn tất cả
+                  </label>
+                  <button
+                    className="submission-action-button"
+                    type="button"
+                    disabled={
+                      !activeSession ||
+                      selectedForActions.length === 0 ||
+                      updatingSubmissionSelection ||
+                      deletingSubmissions ||
+                      pendingProposal
+                    }
+                    onClick={() =>
+                      void updateSelectedSubmissionAttachments(true)
+                    }
+                  >
+                    Gắn vào phiên
+                  </button>
+                  <button
+                    className="submission-action-button"
+                    type="button"
+                    disabled={
+                      !activeSession ||
+                      selectedForActions.length === 0 ||
+                      !selectedForActions.some((id) =>
+                        selectedSubmissionIds.includes(id),
+                      ) ||
+                      updatingSubmissionSelection ||
+                      deletingSubmissions ||
+                      pendingProposal
+                    }
+                    onClick={() =>
+                      void updateSelectedSubmissionAttachments(false)
+                    }
+                  >
+                    Bỏ gắn
+                  </button>
+                  <button
+                    className="submission-delete-button"
+                    type="button"
+                    disabled={
+                      selectedForActions.length === 0 || deletingSubmissions
+                    }
+                    onClick={() => void deleteSelectedSubmissions()}
+                  >
+                    {deletingSubmissions
+                      ? "Đang xóa..."
+                      : `Xóa đã chọn (${selectedForActions.length})`}
+                  </button>
+                </div>
+              )}
               {!activeSession && (
                 <p className="empty-note">
                   Tạo hoặc chọn phiên chat trước để gắn bài nộp vào phiên.
@@ -1324,16 +1722,13 @@ function App() {
               {submissions.length ? (
                 <div className="submission-list">
                   {submissions.map((submission) => (
-                    <label className="submission-item" key={submission.id}>
+                    <div className="submission-item" key={submission.id}>
                       <input
                         type="checkbox"
-                        checked={selectedSubmissionIds.includes(submission.id)}
-                        disabled={
-                          !activeSession ||
-                          updatingSubmissionSelection ||
-                          pendingProposal
-                        }
-                        onChange={() => toggleSubmission(submission.id)}
+                        aria-label={`Chọn ${submission.filename || `submission ${submission.id}`}`}
+                        checked={selectedForActions.includes(submission.id)}
+                        disabled={deletingSubmissions}
+                        onChange={() => toggleActionSelection(submission.id)}
                       />
                       <span className="file-icon">{"</>"}</span>
                       <span className="submission-name">
@@ -1345,9 +1740,12 @@ function App() {
                           {submission.score === null
                             ? "Chưa có điểm"
                             : `${submission.score} pts`}
+                          {selectedSubmissionIds.includes(submission.id)
+                            ? " · Đã gắn vào phiên"
+                            : ""}
                         </small>
                       </span>
-                    </label>
+                    </div>
                   ))}
                 </div>
               ) : (

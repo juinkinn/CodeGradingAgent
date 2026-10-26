@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SubmissionCreate(BaseModel):
@@ -19,6 +19,21 @@ class SubmissionUpdate(BaseModel):
         if value is None:
             raise ValueError("source_code cannot be null")
         return value
+
+
+class SubmissionBulkDeleteRequest(BaseModel):
+    ids: list[int] = Field(min_length=1)
+
+    @field_validator("ids")
+    @classmethod
+    def submission_ids_must_be_unique(cls, value: list[int]) -> list[int]:
+        if len(value) != len(set(value)):
+            raise ValueError("submission ids must be unique")
+        return value
+
+
+class SubmissionBulkDeleteResponse(BaseModel):
+    deleted_ids: list[int]
 
 
 class SubmissionResponse(BaseModel):
@@ -47,6 +62,7 @@ class SubmissionUploadBatchResponse(BaseModel):
     assignment_id: int
     status: str
     created_at: datetime
+    queued_at: datetime | None
     items: list[SubmissionUploadItemResponse]
 
     model_config = ConfigDict(from_attributes=True)

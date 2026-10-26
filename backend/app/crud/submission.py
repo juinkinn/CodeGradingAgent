@@ -1,6 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.models.submission import Submission
+from app.models.submission_upload import SubmissionUploadItem
 from app.schemas.submission import SubmissionCreate, SubmissionUpdate
 
 
@@ -24,6 +25,10 @@ def get_by_assignment(db: Session, assignment_id: int):
     )
 
 
+def get_many(db: Session, submission_ids: list[int]) -> list[Submission]:
+    return db.query(Submission).filter(Submission.id.in_(submission_ids)).all()
+
+
 def update(db: Session, submission: Submission, data: SubmissionUpdate):
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(submission, key, value)
@@ -36,3 +41,18 @@ def update(db: Session, submission: Submission, data: SubmissionUpdate):
 def delete(db: Session, submission: Submission):
     db.delete(submission)
     db.commit()
+
+
+def delete_many(db: Session, submissions: list[Submission]) -> list[int]:
+    submission_ids = [submission.id for submission in submissions]
+    upload_items = (
+        db.query(SubmissionUploadItem)
+        .filter(SubmissionUploadItem.submission_id.in_(submission_ids))
+        .all()
+    )
+    for item in upload_items:
+        item.submission_id = None
+    for submission in submissions:
+        db.delete(submission)
+    db.commit()
+    return submission_ids

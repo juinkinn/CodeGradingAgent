@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session, selectinload
 
 from app.models.submission_upload import (
@@ -23,6 +25,14 @@ def create_batch(
     db.add(batch)
     db.commit()
     return get_batch(db, batch.id)
+
+
+def mark_batch_queued(db: Session, batch_id: int) -> datetime:
+    queued_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    batch = db.query(SubmissionUploadBatch).filter_by(id=batch_id).one()
+    batch.queued_at = queued_at
+    db.commit()
+    return queued_at
 
 
 def get_batch(db: Session, batch_id: int) -> SubmissionUploadBatch | None:

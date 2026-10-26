@@ -1,6 +1,8 @@
 import json
 import logging
 import sys
+import time
+from datetime import datetime, timezone
 
 import pika
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,14 +23,42 @@ logger = logging.getLogger(__name__)
 
 
 def process_batch(batch_id: int) -> None:
+    started_at = time.perf_counter()
     db = SessionLocal()
     try:
         batch = db.query(SubmissionUploadBatch).filter_by(id=batch_id).first()
         if batch is None or batch.status in {"COMPLETED", "COMPLETED_WITH_ERRORS"}:
+            logger.info(
+                "Skipping submission upload batch %s with status %s",
+                batch_id,
+                batch.status if batch is not None else "MISSING",
+            )
             return
+
+        queued_at = batch.queued_at or batch.created_at
+        if queued_at is not None:
+            queued_at = queued_at.replace(tzinfo=timezone.utc)
+            queue_wait_seconds = max(
+                0.0,
+                (datetime.now(timezone.utc) - queued_at).total_seconds(),
+            )
+            logger.info(
+                "Submission upload batch %s queue wait: %.3f seconds "
+                "(queued_at=%s timestamp_source=%s)",
+                batch_id,
+                queue_wait_seconds,
+                queued_at.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                "queued_at" if batch.queued_at is not None else "created_at",
+            )
+        else:
+            logger.warning(
+                "Submission upload batch %s has no queued_at timestamp",
+                batch_id,
+            )
 
         batch.status = "PROCESSING"
         db.commit()
+        logger.info("Started processing submission upload batch %s", batch_id)
         item_ids = [
             item_id
             for (item_id,) in db.query(SubmissionUploadItem.id)
@@ -94,6 +124,13 @@ def process_batch(batch_id: int) -> None:
         )
         batch.status = "COMPLETED_WITH_ERRORS" if failed_count else "COMPLETED"
         db.commit()
+        logger.info(
+            "Completed submission upload batch %s: status=%s files=%s duration_ms=%.2f",
+            batch_id,
+            batch.status,
+            len(item_ids),
+            (time.perf_counter() - started_at) * 1000,
+        )
     except SQLAlchemyError:
         db.rollback()
         raise
@@ -119,6 +156,7 @@ def run_worker() -> None:
             return
 
         try:
+            logger.info("Worker received submission upload batch %s", batch_id)
             process_batch(batch_id)
         except SQLAlchemyError:
             logger.exception("Could not process submission upload batch %s", batch_id)
@@ -142,6 +180,7 @@ def run_worker() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger().setLevel(logging.INFO)
     try:
         run_worker()
     except pika.exceptions.AMQPError:

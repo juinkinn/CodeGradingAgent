@@ -1,10 +1,14 @@
 import logging
+import re
+import threading
+import time
 from typing import Any, Literal, NotRequired, TypedDict
 
 from app.env import settings
 from google.genai.errors import APIError
 from langfuse.api.core import ApiError as LangfuseApiError
 from langchain_core.exceptions import LangChainException
+from langchain_google_genai.chat_models import GoogleAPIError, GoogleRateLimitError
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -19,6 +23,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 MAX_HISTORY_MESSAGES = 30
+MODEL_REQUEST_MIN_INTERVAL_SECONDS = 5.0
+MAX_QUOTA_RETRIES = 3
+TRANSIENT_RETRY_BASE_SECONDS = 2.0
+TRANSIENT_RETRY_MAX_SECONDS = 30.0
+_model_request_lock = threading.Lock()
+_last_model_request_at = 0.0
+_model_cooldown_until = 0.0
 
 
 class ProposedGrade(BaseModel):
@@ -106,6 +117,8 @@ AgentDecision = (
 class GradingAgentState(TypedDict):
     context: str
     history: list[BaseMessage]
+    routing_context: NotRequired[str]
+    grading_context: NotRequired[str]
     has_submissions: NotRequired[bool]
     submissions: NotRequired[list[SubmissionForGrading] | None]
     available_submissions: NotRequired[list[SubmissionOption]]
@@ -130,8 +143,99 @@ def _create_model():
         model=settings.gemini_model,
         google_api_key=settings.gemini_api_key,
         temperature=0,
-        max_retries=2,
+        max_retries=0,
     )
+
+
+def _wait_for_model_request_slot() -> None:
+    global _last_model_request_at
+    with _model_request_lock:
+        now = time.monotonic()
+        wait_seconds = max(
+            0.0,
+            _last_model_request_at + MODEL_REQUEST_MIN_INTERVAL_SECONDS - now,
+            _model_cooldown_until - now,
+        )
+        if wait_seconds:
+            logger.info("Rate limiting Gemini request; waiting %.1f seconds", wait_seconds)
+            time.sleep(wait_seconds)
+        _last_model_request_at = time.monotonic()
+
+
+def _server_retry_delay(exc: Exception) -> float | None:
+    current_error: BaseException | None = exc
+    while current_error is not None:
+        details = getattr(current_error, "details", None)
+        if details is None:
+            details = getattr(current_error, "response_json", None)
+        if isinstance(details, dict):
+            error_details = details.get("error", details)
+            if isinstance(error_details, dict):
+                for detail in error_details.get("details", []):
+                    if (
+                        isinstance(detail, dict)
+                        and detail.get("@type", "").endswith("google.rpc.RetryInfo")
+                    ):
+                        retry_delay = detail.get("retryDelay", "")
+                        match = re.fullmatch(r"(\d+(?:\.\d+)?)s", retry_delay)
+                        if match:
+                            return float(match.group(1))
+        current_error = current_error.__cause__
+
+    match = re.search(r"retry in (\d+(?:\.\d+)?)s", str(exc), re.IGNORECASE)
+    return float(match.group(1)) if match else None
+
+
+def _quota_retry_delay(exc: Exception) -> float:
+    return _server_retry_delay(exc) or 60.0
+
+
+def _extend_model_cooldown(delay_seconds: float) -> None:
+    global _model_cooldown_until
+    with _model_request_lock:
+        _model_cooldown_until = max(
+            _model_cooldown_until,
+            time.monotonic() + delay_seconds,
+        )
+
+
+def _invoke_model_with_quota_retry(model: Any, messages: list[BaseMessage]) -> Any:
+    retries = 0
+    while True:
+        _wait_for_model_request_slot()
+        try:
+            return model.invoke(messages)
+        except (APIError, GoogleAPIError, GoogleRateLimitError) as exc:
+            is_quota_error = isinstance(exc, GoogleRateLimitError) or (
+                isinstance(exc, APIError) and exc.code == 429
+            )
+            is_transient_error = isinstance(exc, (APIError, GoogleAPIError)) and (
+                exc.code in {500, 502, 503, 504}
+            )
+            if (
+                not (is_quota_error or is_transient_error)
+                or retries >= MAX_QUOTA_RETRIES
+            ):
+                raise
+            retries += 1
+            if is_quota_error:
+                retry_delay = _quota_retry_delay(exc)
+                retry_reason = "quota exceeded"
+            else:
+                retry_delay = _server_retry_delay(exc) or min(
+                    TRANSIENT_RETRY_BASE_SECONDS * (2 ** (retries - 1)),
+                    TRANSIENT_RETRY_MAX_SECONDS,
+                )
+                retry_reason = "temporarily unavailable"
+            _extend_model_cooldown(retry_delay)
+            logger.warning(
+                "Gemini %s; retrying request in %.1f seconds "
+                "(attempt %s/%s)",
+                retry_reason,
+                retry_delay,
+                retries,
+                MAX_QUOTA_RETRIES,
+            )
 
 
 def _messages_with_prompt(prompt: str, history: list[BaseMessage]) -> list[BaseMessage]:
@@ -170,7 +274,7 @@ def _invoke_with_prompt(
     system_prompt, managed_prompt = _resolve_system_prompt(prompt_name, **variables)
     messages = _messages_with_prompt(system_prompt, history)
     with propagate_attributes(prompt=managed_prompt):
-        return model.invoke(messages)
+        return _invoke_model_with_quota_retry(model, messages)
 
 
 def _build_graph():
@@ -188,11 +292,18 @@ def _build_graph():
     response_model = _create_model().with_structured_output(TextAgentResponse)
 
     def route_intent(state: GradingAgentState) -> dict:
+        routing_context = state.get("routing_context", state["context"])
+        if state.get("submissions") is not None:
+            routing_context += (
+                "\n\nBatch grading is handled by the application one submission "
+                "at a time. For requests to grade attached submissions, select "
+                "the grades action regardless of the total submission count."
+            )
         result = _invoke_with_prompt(
             router_model,
             "grading-agent-router",
             state["history"],
-            context=state["context"],
+            context=routing_context,
         )
         return {"intent": result}
 
@@ -237,7 +348,7 @@ def _build_graph():
                 )
             }
 
-        context = state["context"]
+        context = state.get("grading_context", state["context"])
         if state["intent"].action == "rubric_and_grades" and rubric_response:
             context += (
                 "\n\nNewly generated rubric for this grading request: "
@@ -383,6 +494,8 @@ def run_grading_agent(
     *,
     context: str,
     history: list[tuple[str, str]],
+    routing_context: str | None = None,
+    grading_context: str | None = None,
     session_id: int | None = None,
     has_submissions: bool = True,
     submissions: list[SubmissionForGrading] | None = None,
@@ -416,6 +529,8 @@ def run_grading_agent(
         graph = _build_graph()
         graph_input = {
             "context": context,
+            "routing_context": routing_context or context,
+            "grading_context": grading_context or context,
             "history": messages,
             "has_submissions": has_submissions,
             "submissions": submissions,

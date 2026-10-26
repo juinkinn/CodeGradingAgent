@@ -13,6 +13,7 @@ class SubmissionUploadBatch(Base):
     created_at = Column(
         DateTime, nullable=False, server_default=func.current_timestamp()
     )
+    queued_at = Column(DateTime, nullable=True)
 
     assignment = relationship("Assignment", back_populates="upload_batches")
     items = relationship(
