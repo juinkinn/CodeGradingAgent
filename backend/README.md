@@ -1,128 +1,174 @@
 # Backend
 
-## Install and run
+CodeGradingAgent's backend is built with FastAPI and provides authentication, assignment and submission management, asynchronous uploads, and an AI-assisted grading workflow powered by LangGraph and Gemini.
 
-From the `backend` directory:
+## Table of Contents
+
+- [Getting Started](#getting-started)
+- [Configuration](#configuration)
+- [Authentication](#authentication)
+- [Database and Migrations](#database-and-migrations)
+- [Asynchronous Submission Uploads](#asynchronous-submission-uploads)
+- [AI Grading Agent](#ai-grading-agent)
+- [Langfuse and Prompt Management](#langfuse-and-prompt-management)
+- [Observability with Grafana Cloud](#observability-with-grafana-cloud)
+- [Evaluation](#evaluation)
+- [API Examples](#api-examples)
+- [Frontend Integration](#frontend-integration)
+
+## Getting Started
+
+### Prerequisites
+
+- Python and pip
+- RabbitMQ for asynchronous submission uploads
+- Gemini API key
+- Langfuse project with the required prompts configured
+
+Google OAuth and Grafana Cloud integration are optional.
+
+### Installation
+
+Run the following commands from the `backend` directory:
 
 ```powershell
 python -m pip install -r requirements.txt
 Copy-Item .env.example .env
-# Open .env and add your Gemini API key.
+```
+
+Configure the required environment variables in `.env`, then start the API:
+
+```powershell
 uvicorn app.main:app --reload
 ```
 
-The backend can also be built with `docker build -t codegradingagent-backend .`
-from this directory. The repository-root `Dockerfile` builds the same backend
-image when invoked from the repository root.
-
-The automated backend tests use the standard library `unittest` runner:
+Run the automated backend tests:
 
 ```powershell
 python -m unittest discover -s test -v
 ```
 
-Configuration is read from `backend/.env` by `app/env.py`. The checked-in
-`.env.example` lists supported variables; `.env` is ignored by Git so API keys
-remain local. Environment variables already set in the process take precedence
-over values in `.env`.
+The backend can also be built into a Docker image:
+
+```powershell
+docker build -t codegradingagent-backend .
+```
+
+This command uses the backend directory's Dockerfile. The repository-root Dockerfile builds the same backend image when invoked from the project root.
+
+## Configuration
+
+Configuration is loaded by `app/env.py` from `backend/.env`. Environment variables already defined in the process take precedence over values in `.env`.
+
+The checked-in `.env.example` lists the supported configuration variables. Keep secrets in `.env`, which is ignored by Git.
+
+The main configuration groups are:
+
+| Category | Variables | Purpose |
+|---|---|---|
+| AI | `GEMINI_API_KEY`, `GEMINI_MODEL` | Configure Gemini access and model selection |
+| Authentication | `AUTH_SECRET_KEY`, `AUTH_COOKIE_SECURE` | Configure session security |
+| Google OAuth | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Enable Google sign-in |
+| Frontend | `FRONTEND_URL`, `CORS_ORIGINS` | Configure frontend redirects and CORS |
+| Langfuse | `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL`, `LANGFUSE_PROMPT_LABEL` | Configure tracing and managed prompts |
+| RabbitMQ | `RABBITMQ_URL`, `SUBMISSION_UPLOAD_QUEUE` | Configure upload job publishing and queue selection |
+| OpenTelemetry | `OTEL_SERVICE_NAME`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_EXPORTER_OTLP_PROTOCOL`, `OTEL_EXPORTER_OTLP_HEADERS` | Configure metrics and trace export |
+
+The grading agent requires Gemini and Langfuse configuration. Google OAuth and Grafana Cloud telemetry are optional.
 
 ## Authentication
 
-The app supports email/password accounts and optional Google sign-in. All
-assignments, submissions, and grading sessions are scoped to the signed-in
-account; there are no roles or sharing controls. Existing assignments without
-an owner are transferred to the first account created after this migration.
+The application supports email/password accounts and optional Google sign-in.
 
-Set a strong, private `AUTH_SECRET_KEY` in `backend/.env` before registering.
-Generate one with:
+- Assignments, submissions, and grading sessions are scoped to the signed-in account.
+- The application does not currently implement roles or sharing controls.
+- Existing assignments without an owner are transferred to the first account created after the ownership migration.
+
+### Session security
+
+Generate a strong authentication secret:
 
 ```powershell
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-Passwords are stored as salted PBKDF2-SHA256 hashes. Browser sessions use
-HttpOnly, SameSite=Lax cookies. Set `AUTH_COOKIE_SECURE=true` when serving the
-app over HTTPS; it must remain `false` for the default local HTTP setup.
+Set the result as `AUTH_SECRET_KEY` in `backend/.env` before registering an account.
 
-Google sign-in is optional. In Google Cloud Console create an OAuth client ID
-of type **Web application**, add
-`http://localhost:8000/auth/google/callback` as an authorized redirect URI, and
-put its client ID and secret into `GOOGLE_CLIENT_ID` and
-`GOOGLE_CLIENT_SECRET`. Set `FRONTEND_URL` to the frontend origin if it differs
-from `http://localhost:5173`. Restart the backend after changing `.env`.
+Passwords are stored as salted PBKDF2-SHA256 hashes. Browser sessions use HttpOnly cookies with `SameSite=Lax`.
 
-## Grafana Cloud performance metrics
+Set `AUTH_COOKIE_SECURE=true` when serving the application over HTTPS. Keep it `false` for the default local HTTP setup.
 
-The backend exports FastAPI HTTP server metrics and request traces to Grafana
-Cloud using OpenTelemetry OTLP/HTTP. Copy the standard OpenTelemetry variables from your
-Grafana Cloud stack's **OpenTelemetry** setup into `backend/.env`:
+### Optional Google sign-in
 
-- `OTEL_SERVICE_NAME`: resource/service name attached to metrics and traces. The default
-  is `codegradingagent-api`.
-- `OTEL_EXPORTER_OTLP_ENDPOINT`: base HTTPS endpoint, usually ending in
-  `/otlp`. Do not append `/v1/metrics` or `/v1/traces`; the backend adds the
-  correct path per signal.
-- `OTEL_EXPORTER_OTLP_PROTOCOL`: set to `http/protobuf`.
-- `OTEL_EXPORTER_OTLP_HEADERS`: copy the authorization header from Grafana.
-  The value uses comma-separated `name=value` syntax; URL-encoded spaces such
-  as `%20` are decoded by the backend.
+1. Create an OAuth client of type **Web application** in Google Cloud Console.
+2. Add this authorized redirect URI:
 
-Metrics export is disabled if the endpoint and headers are both unset. An
-endpoint without headers is allowed for endpoints that do not require
-authentication. Keep the authorization header secret in the ignored `.env`
-file. The Grafana Cloud token should have the minimum required scope,
-`metrics:write`.
+   ```text
+   http://localhost:8000/auth/google/callback
+   ```
 
-After restarting the backend and sending API requests, the service should
-appear in **Application Observability → Services** after ingestion. To inspect
-spans, open **Explore → Tempo** and search for the `OTEL_SERVICE_NAME`. Metrics
-can be viewed in **Explore** with the Prometheus/Mimir data source; search for
-`http_server_request_duration_seconds`. It is a histogram: use
-`http_server_request_duration_seconds_bucket` for latency percentiles and
-`http_server_request_duration_seconds_count` for request volume. For example,
-the 95th percentile latency over five minutes:
+3. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `backend/.env`.
+4. Set `FRONTEND_URL` if the frontend origin differs from `http://localhost:5173`.
+5. Restart the backend.
 
-```promql
-histogram_quantile(
-  0.95,
-  sum by (le) (rate(http_server_request_duration_seconds_bucket[5m]))
-)
+## Database and Migrations
+
+The backend uses SQLite, with the database stored at:
+
+```text
+backend/codegrading.db
 ```
 
-This integration exports HTTP request metrics and traces, not application
-logs. Langfuse continues to handle the grading agent's LLM traces.
+Database schema changes are managed using Alembic. Pending migrations are applied at application startup.
 
-Database schema is managed with Alembic migrations in `backend/migrations`.
-The API applies pending migrations at startup. To apply them manually from
-`backend`:
+To apply migrations manually from the `backend` directory:
 
 ```powershell
 python -m alembic upgrade head
 ```
 
-Existing unversioned databases are adopted at the initial schema revision and
-then upgraded, preserving existing tables and rows. Create a new numbered
-migration after changing models with:
+To generate a migration after modifying database models:
 
 ```powershell
 python -m alembic revision --autogenerate -m "describe schema change"
 ```
 
-Review autogenerated migrations before applying them. The SQLite database is
-stored at `backend/codegrading.db`.
-RabbitMQ defaults to a local broker and the `submission_uploads` queue. Set
-`RABBITMQ_URL` or `SUBMISSION_UPLOAD_QUEUE` to override those defaults.
+Review autogenerated migrations before applying them.
 
-Start one or more upload workers in separate terminals, also from `backend`:
+Existing unversioned databases are adopted at the initial schema revision before subsequent migrations are applied, preserving existing tables and rows.
+
+**Deployment note:** SQLite data on Render's default ephemeral filesystem can be lost when the service restarts, spins down, or is redeployed. This deployment configuration is intended for demonstration, not durable production storage.
+
+## Asynchronous Submission Uploads
+
+The backend uses RabbitMQ to dispatch submission upload jobs to a separate upload worker.
+
+The upload endpoint accepts source files or ZIP archives, persists a batch record, and publishes work to the configured queue. The worker processes the upload jobs asynchronously, allowing the API to return before all files have been processed.
+
+### Supported files and limits
+
+- Source files: `.cpp`, `.c`, `.java`, and `.py`
+- ZIP archives containing supported source files
+- Maximum 100 source files per upload
+- Maximum 5 MiB per source file
+- Maximum 25 MiB total compressed/request data and expanded source data
+- ZIP archives may contain up to 10,000 entries
+
+Unsupported files inside ZIP archives are ignored, while unsupported standalone files are rejected. ZIP contents are read without extracting archive paths to disk.
+
+### Start the worker
+
+Configure `RABBITMQ_URL` if the broker is not running at the default local address. The queue defaults to `submission_uploads` and can be overridden with `SUBMISSION_UPLOAD_QUEUE`.
+
+Start the worker from the `backend` directory:
 
 ```powershell
 python -m app.workers.submission_upload
 ```
 
-## Upload submissions
+Run the API and worker in separate terminals.
 
-Send one or more `.cpp`, `.c`, `.java`, or `.py` files, or ZIP archives
-containing those files, as multipart fields named `files`:
+### Upload files
 
 ```powershell
 curl.exe -X POST "http://localhost:8000/assignments/1/submissions/upload" `
@@ -130,66 +176,99 @@ curl.exe -X POST "http://localhost:8000/assignments/1/submissions/upload" `
   -F "files=@solutions.zip"
 ```
 
-The API returns a batch ID with HTTP `202 Accepted`. Poll
-`GET /submission-upload-batches/{batch_id}` to check each file's status.
-If RabbitMQ is unavailable when publishing, the response includes the persisted
-batch ID; retry it with
-`POST /submission-upload-batches/{batch_id}/retry`.
+The API returns a batch ID with HTTP `202 Accepted`. Poll the batch status endpoint:
 
-Uploads are limited to 100 source files, 5 MiB per source file, and 25 MiB
-total compressed/request data and expanded source data. ZIP archives may have
-up to 10,000 entries and are read without extracting paths to disk. Unsupported
-files inside ZIP archives are ignored; unsupported standalone files are
-rejected.
+```text
+GET /submission-upload-batches/{batch_id}
+```
 
-## Grading assistant chat
+If RabbitMQ is unavailable when publishing, the response includes the persisted batch ID. Retry publishing the batch with:
 
-The chat API uses LangGraph with Gemini (`gemini-3.8-flash` by default).
-`GEMINI_API_KEY` (or `GOOGLE_API_KEY`) enables Gemini and `GEMINI_MODEL` can
-select another model available to your API key. Free-tier model availability
-and rate limits depend on Google's current account and region policies. Google
-currently states that free-tier content may be used to improve its products;
-review Google's current terms and do not send sensitive student or
-institutional data unless your institution permits that use.
+```text
+POST /submission-upload-batches/{batch_id}/retry
+```
 
-The graph first detects whether the session contains only its first instructor
-message or a follow-up. It routes follow-ups using the full conversation
-history, so score feedback, rubric revisions, and insight questions reach the
-appropriate rubric, grading, submission-selection, or response node. Submission
-selection requests can add or remove assignment submissions from the current
-session; grading then uses only the submissions currently attached. Each node
-has its own structured output model and loads its system prompt from Langfuse
-Prompt Management.
+The API and worker must use the same database to access batch and submission records.
 
-Langfuse is required. Set both `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
-in `backend/.env` to enable LangGraph/LLM tracing, model usage and token
-reporting, and managed system prompts. The agent does not have local prompt
-fallbacks and will fail explicitly if Langfuse is not configured or a prompt
-cannot be fetched. Set
-`LANGFUSE_BASE_URL` to your project's regional endpoint (for example,
-`https://cloud.langfuse.com` for EU Cloud or `https://us.cloud.langfuse.com`
-for US Cloud) and `LANGFUSE_PROMPT_LABEL` to the prompt label the agent should
-use (default: `production`).
+## AI Grading Agent
 
-The agent requires these text prompts in the Langfuse project:
+The grading assistant uses **LangGraph and Gemini** to handle instructor requests through an explicit, stateful workflow.
 
-| Prompt name | Copy instructions from | Template variables |
-| --- | --- | --- |
-| `grading-agent-router` | Routing rules (see below) | `context` |
-| `grading-agent-rubric` | Rubric design instructions | `context` |
-| `grading-agent-grades` | Grading instructions | `context` |
-| `grading-agent-response` | Conversation instructions | `context` |
-| `grading-agent-submissions` | Submission selection instructions | `context` |
+The default model is `gemini-3.1-flash`. Set `GEMINI_MODEL` to another model available to your API key if needed. Configure `GEMINI_API_KEY` or `GOOGLE_API_KEY` to enable Gemini access.
 
-In Langfuse Prompt Management, create each as a **Text** prompt and include
-`Assignment context:\n{{context}}`. The router prompt must contain both first-
-message and follow-up routing rules in its static instructions; it must not
-contain the old `{{routing_instructions}}` variable. Assign the label
-configured by `LANGFUSE_PROMPT_LABEL` (by default `production`) to the version
-to serve. The used prompt version is linked to its model generation in traces.
-Requests are grouped by grading session.
+### Supported workflows
 
-Use this complete router prompt as the `grading-agent-router` text:
+- Generate or revise grading rubrics.
+- Grade selected submissions using an available rubric.
+- Generate a rubric and grade submissions in the same proposal when grading is requested without an existing rubric.
+- Explicitly grade without a rubric when requested.
+- Select, add, remove, or switch submissions attached to a grading session.
+- Revise proposed grades or feedback.
+- Answer follow-up questions and provide grading insights.
+
+The agent uses conversation history and the current assignment/session context to interpret follow-up requests. Submission selection and grading are separate operations: selecting a submission does not automatically grade it in the same step.
+
+### Workflow and state management
+
+The graph routes requests to dedicated rubric, grading, submission-selection, or response nodes. When rubric generation and grading are both required, the workflow executes them sequentially.
+
+Each node uses a structured output model and loads its system prompt from Langfuse Prompt Management. The backend handles application-level validation, proposal management, approval, and persistence separately from the agent's generation step.
+
+During grading, each attached submission's complete source code is sent to the grading node sequentially, with one model call per submission. The resulting grades are collected into a proposal.
+
+### Human-in-the-loop approval
+
+By default, generated rubric and grading changes remain proposals until approved. The backend validates proposed grades against the attached submissions and applicable score constraints before applying changes.
+
+A grading session can enable automatic approval using `auto_approve=true`. Otherwise, the instructor can review and approve pending proposals through the API or frontend.
+
+A session can also have its own rubric, allowing grading criteria to be configured without changing the assignment-wide rubric immediately.
+
+### Model reliability
+
+Gemini requests use retry and backoff handling for rate limits and transient server errors. Model availability and rate limits depend on Google's current account, model, and region policies.
+
+Google's free-tier terms may permit submitted content to be used to improve its products. Do not send sensitive student or institutional data unless the applicable policies permit it.
+
+## Langfuse and Prompt Management
+
+Langfuse is required for agent tracing and managed system prompts. The agent does not provide local prompt fallbacks and fails explicitly if required configuration or prompts are unavailable.
+
+Set the following variables in `backend/.env`:
+
+```dotenv
+LANGFUSE_PUBLIC_KEY=your-public-key
+LANGFUSE_SECRET_KEY=your-secret-key
+LANGFUSE_BASE_URL=https://cloud.langfuse.com
+LANGFUSE_PROMPT_LABEL=production
+```
+
+Use the regional base URL corresponding to your Langfuse project. For example, the US Cloud endpoint is `https://us.cloud.langfuse.com`.
+
+### Required prompts
+
+Create the following prompts in Langfuse Prompt Management:
+
+| Prompt name | Purpose | Template variable |
+|---|---|---|
+| `grading-agent-router` | Classify instructor requests and select the workflow | `context` |
+| `grading-agent-rubric` | Generate or revise rubrics | `context` |
+| `grading-agent-grades` | Generate or revise grades and feedback | `context` |
+| `grading-agent-response` | Answer questions and handle conversation | `context` |
+| `grading-agent-submissions` | Select or update attached submissions | `context` |
+
+Create each prompt as a **Text** prompt. Include the assignment context in its template:
+
+```text
+Assignment context:
+{{context}}
+```
+
+Assign the configured `LANGFUSE_PROMPT_LABEL` to the version you want the application to use. The default label is `production`.
+
+The router prompt must include both first-message and follow-up routing rules in its static instructions. Do not use the legacy `{{routing_instructions}}` variable.
+
+The following routing policy can be used as the static content for `grading-agent-router`:
 
 ```text
 You route instructor requests for a grading assistant. Use the full conversation
@@ -212,13 +291,13 @@ Choose exactly one action:
 For a first instructor message, route explicit submission selection to
 "submissions", rubric creation to "rubric", grading to "grades" if a rubric is
 available, and questions or unclear requests to "response". If grading is
-requested without an available rubric, use "rubric_and_grades", except when the
-instructor explicitly asks to grade without one.
+requested without an available rubric, use "rubric_and_grades", except when
+the instructor explicitly asks to grade without one.
 
-For follow-ups, interpret the latest message in light of prior messages and the
-current proposal. Score or feedback changes route to "grades"; rubric creation
-or revision routes to "rubric"; insight requests and questions route to
-"response". If grading follows a rubric discussion, use "grades" and that
+For follow-ups, interpret the latest message in light of prior messages and
+the current proposal. Score or feedback changes route to "grades"; rubric
+creation or revision routes to "rubric"; insight requests and questions route
+to "response". If grading follows a rubric discussion, use "grades" and that
 rubric. When a message requests both rubric changes and grading, use
 "rubric_and_grades" if there is no rubric; otherwise route to "rubric" first
 and let the instructor request grading afterward. If intent remains unclear,
@@ -228,29 +307,84 @@ Assignment context:
 {{context}}
 ```
 
-Langfuse receives model inputs and outputs, which can include instructor chat,
-assignment details, and complete student source code. Confirm your institution
-permits sending that data to the configured Langfuse instance.
+**Data privacy:** Langfuse receives model inputs and outputs, which may include instructor conversations, assignment details, and complete student source code. Confirm that sending this data to the configured Langfuse instance is permitted by your institution's policies.
 
-## LLMOps evaluation with DeepEval
+## Observability with Grafana Cloud
 
-Run the evaluation CLI from `backend` after configuring Gemini and Langfuse:
+The backend uses OpenTelemetry to export FastAPI HTTP request metrics and traces to Grafana Cloud over OTLP/HTTP. Langfuse separately provides LLM and agent tracing.
+
+### Configuration
+
+Copy the appropriate OpenTelemetry configuration from your Grafana Cloud stack into `backend/.env`:
+
+```dotenv
+OTEL_SERVICE_NAME=codegradingagent-api
+OTEL_EXPORTER_OTLP_ENDPOINT=https://your-otlp-endpoint/otlp
+OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=your-encoded-authorization-value
+```
+
+These are example values; use the endpoint and authorization header supplied by your Grafana Cloud stack.
+
+- `OTEL_SERVICE_NAME` identifies the service in telemetry.
+- `OTEL_EXPORTER_OTLP_ENDPOINT` is the base endpoint. The backend appends `/v1/metrics` and `/v1/traces` for the respective signals.
+- `OTEL_EXPORTER_OTLP_PROTOCOL` must be `http/protobuf`.
+- `OTEL_EXPORTER_OTLP_HEADERS` uses comma-separated `name=value` pairs. URL-encoded values such as `%20` are decoded by the backend.
+
+Telemetry export is disabled when both the endpoint and headers are unset. An endpoint without headers is supported for endpoints that do not require authentication.
+
+Keep Grafana credentials private. Use a token with the minimum permissions required for telemetry ingestion, including `metrics:write` for metrics.
+
+### Inspect telemetry
+
+After configuring the environment and restarting the backend, send API requests to generate telemetry.
+
+- **Services:** Open Application Observability → Services.
+- **Traces:** Open Explore → Tempo and search for the configured service name.
+- **Metrics:** Open Explore and select the Prometheus/Mimir data source. Search for `http_server_request_duration_seconds`.
+
+The request duration metric is a histogram. Its `_bucket` series can be used to calculate latency percentiles, while `_count` can be used to measure request volume.
+
+Example: calculate the 95th-percentile request duration over five minutes:
+
+```promql
+histogram_quantile(
+  0.95,
+  sum by (le) (
+    rate(http_server_request_duration_seconds_bucket[5m])
+  )
+)
+```
+
+This integration exports HTTP request metrics and traces, not application logs. Metrics and traces may take time to appear after ingestion.
+
+## Evaluation
+
+The backend includes a DeepEval-based evaluation runner for testing the grading agent against a golden dataset.
+
+### Run the evaluation
+
+Run from the `backend` directory:
 
 ```powershell
 python -m app.evaluation.runner
 ```
 
-The CLI runs the golden cases in `backend/evaluation/golden_cases.json` through
-the actual grading agent and its currently labeled Langfuse prompts. DeepEval
-G-Eval uses the configured `GEMINI_MODEL` as an LLM judge. The local report
-includes per-case expected/actual action, judge score and rationale, plus
-deterministic NLP diagnostics: token-level F1 and ROUGE-L against each
-case's `expected_response`. The aggregate action accuracy and mean scores are
-also reported, along with agent and judge durations. Agent and judge Gemini
-calls are traced to Langfuse under a `deepeval-<case-id>` session, including
-available token usage.
+The runner executes the cases in `backend/evaluation/golden_cases.json` through the actual grading agent using the currently labeled Langfuse prompts.
 
-Save a report to a chosen path or change the judge threshold with:
+DeepEval G-Eval uses the configured `GEMINI_MODEL` as an LLM judge. The local report includes:
+
+- Expected and actual actions for each case.
+- Judge score and rationale.
+- Action accuracy and mean judge score.
+- Token-level F1 and ROUGE-L against each case's `expected_response`.
+- Agent execution and judge durations.
+
+Agent and judge calls are traced to Langfuse under `deepeval-<case-id>` sessions, including available token usage.
+
+### Customize the run
+
+Set the judge threshold and output path:
 
 ```powershell
 python -m app.evaluation.runner `
@@ -258,34 +392,47 @@ python -m app.evaluation.runner `
   --report evaluation\my-run.json
 ```
 
-Without `--report`, timestamped JSON reports are saved under
-`backend/evaluation/results/` (ignored by Git). Add representative, anonymized
-regression cases to the golden dataset as the agent behavior evolves. The NLP
-overlap scores are diagnostics, not a substitute for the semantic Gemini
-judge. Evaluations make real Gemini and Langfuse calls and can incur API cost.
-Case inputs (including attached sample code) are sent to Gemini and captured in
-Langfuse traces; reports stay local and are not uploaded to Confident AI.
+Without `--report`, timestamped JSON reports are saved under `backend/evaluation/results/`, which is ignored by Git.
 
-Create an empty assistant session first, then attach submissions as needed:
+Add representative, anonymized regression cases to the golden dataset as agent behavior evolves.
+
+### Interpreting results
+
+The lexical overlap metrics are diagnostics, not substitutes for semantic evaluation. The Gemini judge is not independent ground truth, particularly when the agent and judge use the same model.
+
+Evaluation makes real Gemini and Langfuse calls and may incur API costs. Case inputs, including attached sample code, are sent to Gemini and captured in Langfuse traces. Reports remain local and are not uploaded to Confident AI.
+
+## API Examples
+
+The following examples assume the backend is running locally at `http://localhost:8000` and the referenced assignment and submission IDs exist.
+
+### Create a grading session
+
+Create an empty session that requires approval:
 
 ```powershell
 $session = Invoke-RestMethod -Method Post `
   -Uri "http://localhost:8000/assignments/1/agent-sessions" `
   -ContentType "application/json" `
   -Body '{"submission_ids":[],"auto_approve":false}'
-$sessionId = $session.id
 
+$sessionId = $session.id
+```
+
+### Attach submissions
+
+```powershell
 Invoke-RestMethod -Method Patch `
   -Uri "http://localhost:8000/grading-sessions/$sessionId/submissions" `
   -ContentType "application/json" `
   -Body '{"submission_ids":[1]}'
 ```
 
-The UI synchronizes its submission checkboxes with the selected session. In chat,
-ask to add/remove a submission by ID or filename to update the same session.
-Resolve any pending proposal before changing its attached submissions.
+The UI synchronizes submission checkboxes with the selected session. In chat, instructors can also request submission selection by ID or filename.
 
-Send the first message or continue the conversation:
+Resolve pending proposals before changing the attached submissions.
+
+### Chat with the grading agent
 
 ```powershell
 Invoke-RestMethod -Method Post `
@@ -294,16 +441,11 @@ Invoke-RestMethod -Method Post `
   -Body '{"content":"Grade the attached submission using the assignment rubric."}'
 ```
 
-The UI uses `POST /grading-sessions/{session_id}/chat/stream` for server-sent
-progress updates while the agent runs. It emits an initial status immediately,
-periodic processing updates for longer requests, and the complete session/message
-payload when finished. The existing `/chat` endpoint remains available for
-clients that prefer a normal JSON response.
+The frontend uses `POST /grading-sessions/{session_id}/chat/stream` for server-sent progress updates. The stream emits an initial status, periodic updates for longer requests, and the completed session/message payload. The normal `/chat` endpoint remains available for clients that prefer a JSON response.
 
-The instructor may request a rubric, grading with or without a rubric, a
-stricter/more lenient regrade, rubric revisions, or follow-up/insight questions
-in the same conversation. Rubrics can be provided in chat or configured as a
-session-specific setting. For example, create a session with a rubric:
+### Configure a session-specific rubric
+
+A session can be created with its own rubric:
 
 ```powershell
 $session = Invoke-RestMethod -Method Post `
@@ -312,8 +454,7 @@ $session = Invoke-RestMethod -Method Post `
   -Body '{"submission_ids":[1],"rubric":{"correctness":{"points":10}}}'
 ```
 
-The session rubric is used for grading without modifying the assignment-wide
-rubric. It can also be set or updated later:
+Update the rubric later:
 
 ```powershell
 Invoke-RestMethod -Method Patch `
@@ -322,18 +463,20 @@ Invoke-RestMethod -Method Patch `
   -Body '{"rubric":{"correctness":{"points":10}}}'
 ```
 
-By default, rubric and score proposals do not change the assignment or
-submissions until approved:
+The session rubric is used for grading without immediately modifying the assignment-wide rubric.
+
+### Approve a proposal
+
+By default, generated rubric and grading changes require approval:
 
 ```powershell
 Invoke-RestMethod -Method Post `
   -Uri "http://localhost:8000/grading-sessions/$sessionId/approve"
 ```
 
-If a rubric is pending approval when the instructor requests grading, both
-changes are combined in one proposal. Follow-up questions preserve any pending
-proposal. To trust the agent to apply proposals automatically, create the
-session with `"auto_approve": true`, or update the setting:
+If rubric generation is pending when grading is requested, the changes are combined into one proposal.
+
+To enable automatic approval for a session:
 
 ```powershell
 Invoke-RestMethod -Method Patch `
@@ -342,37 +485,12 @@ Invoke-RestMethod -Method Patch `
   -Body '{"auto_approve":true}'
 ```
 
-Set `auto_approve` to `false` to require approval again. This is a backend REST
-API. A minimal React interface is available in `frontend`.
+Set `auto_approve` to `false` to require approval again.
 
-## React frontend
+## Frontend Integration
 
-From the `frontend` directory:
+The React frontend lives in the `frontend` directory. To start it locally, follow the frontend setup instructions in the repository-root README.
 
-```powershell
-npm install
-Copy-Item .env.example .env
-npm run dev
-```
+The UI provides assignment management, assignment settings, submission uploads, submission selection, and grading chat. Instructors can use natural language to request rubric generation, grading, regrading, rubric revisions, and follow-up questions.
 
-The Vite dev server runs at `http://localhost:5173` and calls the backend at
-`http://localhost:8000` by default. Configure `VITE_API_BASE_URL` in
-`frontend/.env` to change the API address. Add the frontend origin to
-`CORS_ORIGINS` in `backend/.env` when using a different origin.
-
-The UI opens on an assignment home page with the assignment list and a form to
-create assignments. Open an assignment to view its details, edit its settings,
-upload submissions, select submissions, and use the grading chat. A
-natural-language rubric is optional. Select one or more `.cpp`, `.c`, `.java`,
-or `.py` files or a ZIP to upload into that assignment. Once processing
-completes, choose the submissions for a chat session to grade, revise the
-rubric, or ask follow-up questions.
-When grading is requested without an existing rubric, the agent generates a
-rubric and grades with it in the same proposal. Approving that proposal saves
-the rubric to the assignment and applies the scores; sessions configured for
-auto-approval apply both automatically. Explicit requests to grade without a
-rubric continue to skip rubric generation.
-
-During grading, each attached submission's complete source code is sent to the
-grading node sequentially, one submission per model call, and the resulting
-grades are collected into one proposal.
+The backend exposes REST endpoints for clients that prefer direct API access, while the streaming chat endpoint supports progress updates during longer agent runs.
