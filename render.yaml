@@ -9,7 +9,7 @@ services:
       - key: API_HOST
         fromService:
           type: web
-          name: codegrading-backend
+          name: codegrading-backend.onrender.com
           property: host
 
   - type: web
